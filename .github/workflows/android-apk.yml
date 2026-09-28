@@ -20,6 +20,10 @@ jobs:
           java-version: "21"
       - name: Instalar dependencias
         run: pnpm install --no-frozen-lockfile
+      - name: Preparar recursos visuales
+        run: |
+          mkdir -p public
+          base64 -d assets/dose-love-pills.webp.b64 > public/dose-love-pills.webp
       - name: Construir aplicación web
         run: pnpm build
       - name: Crear proyecto Android
