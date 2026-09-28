@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Preferences } from "@capacitor/preferences";
 import { LocalNotifications } from "@capacitor/local-notifications";
-import { Bell, Check, HeartPulse, History, Home, PackageOpen, Pencil, Pill, Plus, Trash2, UserRound, X } from "lucide-react";
+import { AlertTriangle, Bell, Check, HeartPulse, History, Home, PackageOpen, Pencil, Phone, Pill, Plus, Trash2, UserRound, X } from "lucide-react";
 import "./styles.css";
 
 type Tab = "inicio" | "medicinas" | "historial" | "pastillero" | "perfil";
@@ -87,7 +87,7 @@ function Header() {
   return <header className="topbar"><div className="brand-heart"><HeartPulse /></div><div className="brand"><strong>VITANEX</strong><small>Tu salud, siempre a tiempo</small></div><button className="bell" aria-label="Notificaciones"><Bell /></button></header>;
 }
 
-function HomeView({ medicines, events, onAdd, onConfirm }: { medicines: Medicine[]; events: DoseEvent[]; onAdd: () => void; onConfirm: (group: ScheduledDose[]) => void }) {
+function HomeView({ medicines, events, onAdd, onConfirm, onSOS }: { medicines: Medicine[]; events: DoseEvent[]; onAdd: () => void; onConfirm: (group: ScheduledDose[]) => void; onSOS: () => void }) {
   const [now, setNow] = useState(new Date());
   useEffect(() => { const timer = window.setInterval(() => setNow(new Date()), 15000); return () => window.clearInterval(timer); }, []);
   const today = new Intl.DateTimeFormat("es-EC", { weekday: "long", day: "numeric", month: "long" }).format(now);
@@ -106,7 +106,7 @@ function HomeView({ medicines, events, onAdd, onConfirm }: { medicines: Medicine
   const remainingToday = countRemainingToday(medicines, events, now);
   return <section className="screen home">
     <p className="eyebrow date">{today.charAt(0).toUpperCase() + today.slice(1)}</p><h1>Buenas noches, Randy</h1><p className="lead">Tienes tu salud organizada para hoy.</p><span className="status-pill">Pastillero disponible muy pronto</span>
-    <button className="sos"><span className="sos-icon">△</span><span><strong>SOS · Me siento mal</strong><small>Llama al 911 o avisa a tu contacto de emergencia</small></span><b>›</b></button>
+    <button className="sos" onClick={onSOS}><span className="sos-icon">△</span><span><strong>SOS · Me siento mal</strong><small>Llama al 911 o avisa a tu contacto de emergencia</small></span><b>›</b></button>
     <article className="dose-card">
       <div className="dose-art"><i></i><i></i><span>♥</span></div><p>◷ &nbsp; Próxima dosis</p>
       {group.length ? <>
@@ -153,20 +153,52 @@ function SimpleView({ tab }: { tab: "pastillero" | "perfil" }) {
   const [eyebrow,title,text,Icon]=data; return <section className="screen simple"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><article className="empty-card"><span className="empty-icon"><Icon /></span><h2>Estamos preparando esta sección</h2><p>{text}</p></article></section>;
 }
 
+function SOSModal({ onClose }: { onClose: () => void }) {
+  const [countdown,setCountdown]=useState(5);
+  useEffect(()=>{if(countdown<=0)return;const timer=window.setTimeout(()=>setCountdown(value=>value-1),1000);return()=>window.clearTimeout(timer);},[countdown]);
+  const call911=()=>{window.location.href="tel:911";};
+  return <div className="modal-backdrop sos-backdrop"><section className="sos-modal">
+    <div className="modal-head"><div><p className="eyebrow emergency">Asistencia de emergencia</p><h2><AlertTriangle/> ¿Te sientes mal?</h2></div><button className="close" onClick={onClose}><X/></button></div>
+    <p>Si existe peligro inmediato, llama al ECU 911. VITANEX no reemplaza a los servicios de emergencia.</p>
+    {countdown>0?<div className="sos-countdown"><small>Espera para evitar una pulsación accidental</small><strong>{countdown}</strong><button onClick={onClose}>Cancelar alerta</button></div>:<div className="sos-options"><p>Elige qué deseas hacer. VITANEX no llamará automáticamente.</p><button className="call-911" onClick={call911}><Phone/> Llamar al 911</button><button className="cancel-sos" onClick={onClose}>Estoy bien, cancelar</button></div>}
+  </section></div>;
+}
+
 function App() {
-  const [tab,setTab]=useState<Tab>("inicio"); const [medicines,setMedicines]=useState<Medicine[]>([]); const [events,setEvents]=useState<DoseEvent[]>([]); const [loaded,setLoaded]=useState(false); const [modal,setModal]=useState(false); const [editing,setEditing]=useState<Medicine|null>(null);
-  useEffect(() => { Promise.all([Preferences.get({key:MEDICINES_KEY}),Preferences.get({key:EVENTS_KEY})]).then(([m,e]) => { try{if(m.value)setMedicines(JSON.parse(m.value));}catch{} try{if(e.value)setEvents(JSON.parse(e.value));}catch{} setLoaded(true); }); LocalNotifications.requestPermissions().catch(()=>{}); },[]);
+  const [tab,setTab]=useState<Tab>("inicio"); const [medicines,setMedicines]=useState<Medicine[]>([]); const [events,setEvents]=useState<DoseEvent[]>([]); const [loaded,setLoaded]=useState(false); const [modal,setModal]=useState(false); const [sosOpen,setSosOpen]=useState(false); const [editing,setEditing]=useState<Medicine|null>(null);
+  useEffect(() => {
+    Promise.all([Preferences.get({key:MEDICINES_KEY}),Preferences.get({key:EVENTS_KEY})]).then(([m,e]) => { try{if(m.value)setMedicines(JSON.parse(m.value));}catch{} try{if(e.value)setEvents(JSON.parse(e.value));}catch{} setLoaded(true); });
+    LocalNotifications.requestPermissions().then(()=>LocalNotifications.createChannel({id:"vitanex-reminders",name:"Recordatorios VITANEX",description:"Alarmas para las dosis de medicamentos",importance:5,visibility:1,vibration:true})).catch(()=>{});
+  },[]);
   useEffect(() => { if(loaded) Preferences.set({key:MEDICINES_KEY,value:JSON.stringify(medicines)}); },[medicines,loaded]);
   useEffect(() => { if(loaded) Preferences.set({key:EVENTS_KEY,value:JSON.stringify(events)}); },[events,loaded]);
   useEffect(() => {
-    if(!loaded || !medicines.length) return;
-    const group=getNextGroup(medicines,events); const notifications=group.filter(item=>item.date.getTime()>Date.now()).map((item,index)=>({id:Math.abs(Array.from(item.medicine.id).reduce((n,c)=>n+c.charCodeAt(0),1000))+index,title:"VITANEX · Hora de tu medicamento",body:`${item.medicine.name} · ${item.medicine.dose}`,schedule:{at:item.date},extra:{medicineId:item.medicine.id}}));
-    if(notifications.length) LocalNotifications.schedule({notifications}).catch(()=>{});
+    if(!loaded) return;
+    const program=async()=>{
+      try{
+        const pending=await LocalNotifications.getPending();
+        if(pending.notifications.length) await LocalNotifications.cancel({notifications:pending.notifications.map(item=>({id:item.id}))});
+        const now=new Date(); const limit=new Date(now.getTime()+24*3600000); const notifications:any[]=[];
+        medicines.filter(m=>m.stock>0).forEach(medicine=>{
+          let dose=getNextUnconfirmed(medicine,events,now);
+          if(dose.getTime()<now.getTime()) dose=new Date(dose.getTime()+medicine.intervalHours*3600000);
+          for(let n=0;n<24&&dose<=limit;n++){
+            const seed=Math.abs(Array.from(medicine.id+String(dose.getTime())).reduce((sum,char)=>((sum*31+char.charCodeAt(0))|0),17));
+            const before=new Date(dose.getTime()-5*60000);
+            if(before>now) notifications.push({id:(seed%1000000000)+1,title:"VITANEX · Próxima dosis",body:`En 5 minutos: ${medicine.name} · ${medicine.dose}`,channelId:"vitanex-reminders",schedule:{at:before,allowWhileIdle:true},extra:{medicineId:medicine.id}});
+            if(dose>now) notifications.push({id:((seed+1)%1000000000)+1,title:"VITANEX · Hora de tu medicamento",body:`${medicine.name} · ${medicine.dose}`,channelId:"vitanex-reminders",schedule:{at:dose,allowWhileIdle:true},extra:{medicineId:medicine.id}});
+            dose=new Date(dose.getTime()+medicine.intervalHours*3600000);
+          }
+        });
+        if(notifications.length) await LocalNotifications.schedule({notifications});
+      }catch{}
+    };
+    program();
   },[medicines,events,loaded]);
   const openAdd=()=>{setEditing(null);setModal(true);};
   const save=(data:FormData)=>{if(editing)setMedicines(items=>items.map(item=>item.id===editing.id?{...data,id:item.id,createdAt:item.createdAt}:item));else setMedicines(items=>[...items,{...data,id:crypto.randomUUID(),createdAt:new Date().toISOString()}]);setModal(false);setEditing(null);setTab("medicinas");};
   const remove=(m:Medicine)=>{if(window.confirm(`¿Eliminar ${m.name}?`))setMedicines(items=>items.filter(item=>item.id!==m.id));};
   const confirm=(group:ScheduledDose[])=>{const takenAt=new Date().toISOString();const additions=group.map(item=>({id:slotKey(item.medicine.id,item.date),medicineId:item.medicine.id,medicineName:item.medicine.name,dose:item.medicine.dose,scheduledAt:item.date.toISOString(),takenAt}));setEvents(items=>[...items,...additions.filter(a=>!items.some(e=>e.id===a.id))]);setMedicines(items=>items.map(m=>group.some(g=>g.medicine.id===m.id)?{...m,stock:Math.max(0,m.stock-1)}:m));playVitanexTone();};
-  return <main className="app"><Header />{tab==="inicio"&&<HomeView medicines={medicines} events={events} onAdd={()=>{setTab("medicinas");openAdd();}} onConfirm={confirm}/>} {tab==="medicinas"&&<MedicinesView medicines={medicines} onAdd={openAdd} onEdit={m=>{setEditing(m);setModal(true);}} onDelete={remove}/>} {tab==="historial"&&<HistoryView events={events}/>} {(tab==="pastillero"||tab==="perfil")&&<SimpleView tab={tab}/>}<nav className="bottom-nav">{navItems.map(({id,icon:Icon,label})=><button key={id} className={tab===id?"active":""} onClick={()=>setTab(id)}><Icon/><small>{label}</small></button>)}</nav>{modal&&<MedicineModal editing={editing} onClose={()=>{setModal(false);setEditing(null);}} onSave={save}/>}</main>;
+  return <main className="app"><Header />{tab==="inicio"&&<HomeView medicines={medicines} events={events} onAdd={()=>{setTab("medicinas");openAdd();}} onConfirm={confirm} onSOS={()=>setSosOpen(true)}/>} {tab==="medicinas"&&<MedicinesView medicines={medicines} onAdd={openAdd} onEdit={m=>{setEditing(m);setModal(true);}} onDelete={remove}/>} {tab==="historial"&&<HistoryView events={events}/>} {(tab==="pastillero"||tab==="perfil")&&<SimpleView tab={tab}/>}<nav className="bottom-nav">{navItems.map(({id,icon:Icon,label})=><button key={id} className={tab===id?"active":""} onClick={()=>setTab(id)}><Icon/><small>{label}</small></button>)}</nav>{modal&&<MedicineModal editing={editing} onClose={()=>{setModal(false);setEditing(null);}} onSave={save}/>} {sosOpen&&<SOSModal onClose={()=>setSosOpen(false)}/>}</main>;
 }
 createRoot(document.getElementById("root")!).render(<React.StrictMode><App/></React.StrictMode>);
