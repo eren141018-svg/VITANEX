@@ -32,7 +32,7 @@ jobs:
         run: pnpm exec cap sync android
       - name: Habilitar alarmas exactas
         run: |
-          sed -i '/<manifest/a\    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />' android/app/src/main/AndroidManifest.xml
+          sed -i '/<manifest/a\    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />' android/app/src/main/AndroidManifest.xml
       - name: Aplicar icono oficial de VITANEX
         run: |
           sudo apt-get update -qq
