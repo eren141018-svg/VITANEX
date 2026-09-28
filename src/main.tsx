@@ -29,7 +29,27 @@ function getCurrentSlot(medicine: Medicine, now = new Date()) {
   const start = new Date(now); start.setHours(hours, minutes, 0, 0);
   if (now < start) return start;
   const intervalMs = medicine.intervalHours * 3600000;
-  return new Date(start.getTime() + Math.floor((now.getTime() - start.getTime()) / intervalMs) * intervalMs);
+  const previous = new Date(start.getTime() + Math.floor((now.getTime() - start.getTime()) / intervalMs) * intervalMs);
+  const confirmationLimit = previous.getTime() + 30 * 60000;
+  return now.getTime() <= confirmationLimit ? previous : new Date(previous.getTime() + intervalMs);
+}
+function countExpectedDoses(medicine: Medicine, from: Date, until: Date) {
+  const [hours, minutes] = medicine.startTime.split(":").map(Number);
+  const first = new Date(from); first.setHours(hours, minutes, 0, 0);
+  const intervalMs = medicine.intervalHours * 3600000;
+  while (first < from) first.setTime(first.getTime() + intervalMs);
+  if (first > until) return 0;
+  return Math.floor((until.getTime() - first.getTime()) / intervalMs) + 1;
+}
+function countRemainingToday(medicines: Medicine[], events: DoseEvent[], now: Date) {
+  const end = new Date(now); end.setHours(23,59,59,999);
+  return medicines.reduce((total, medicine) => {
+    if (medicine.stock <= 0) return total;
+    let date = getNextUnconfirmed(medicine, events, now);
+    let count = 0;
+    while (date <= end && count < 48) { count++; date = new Date(date.getTime() + medicine.intervalHours * 3600000); }
+    return total + count;
+  }, 0);
 }
 function getNextUnconfirmed(medicine: Medicine, events: DoseEvent[], now = new Date()) {
   let date = getCurrentSlot(medicine, now);
@@ -73,17 +93,17 @@ function HomeView({ medicines, events, onAdd, onConfirm }: { medicines: Medicine
   const today = new Intl.DateTimeFormat("es-EC", { weekday: "long", day: "numeric", month: "long" }).format(now);
   const group = useMemo(() => getNextGroup(medicines, events, now), [medicines, events, now]);
   const scheduled = group[0]?.date;
-  const active = scheduled ? now.getTime() >= scheduled.getTime() - 5 * 60000 : false;
+  const active = scheduled ? now.getTime() >= scheduled.getTime() - 5 * 60000 && now.getTime() <= scheduled.getTime() + 30 * 60000 : false;
   const minutes = scheduled ? Math.max(0, Math.ceil((scheduled.getTime() - now.getTime()) / 60000)) : 0;
   const weekStart = new Date(now.getTime() - 7 * 86400000);
   const confirmedThisWeek = events.filter(event => new Date(event.scheduledAt) >= weekStart).length;
   const expectedThisWeek = medicines.reduce((total, medicine) => {
     const created = medicine.createdAt ? new Date(medicine.createdAt) : now;
     const trackingStart = created > weekStart ? created : weekStart;
-    const elapsedHours = Math.max(0, (now.getTime() - trackingStart.getTime()) / 3600000);
-    return total + Math.floor(elapsedHours / medicine.intervalHours);
+    return total + countExpectedDoses(medicine, trackingStart, now);
   }, 0);
   const weeklyPercent = expectedThisWeek ? Math.min(100, Math.round(confirmedThisWeek / expectedThisWeek * 100)) : 0;
+  const remainingToday = countRemainingToday(medicines, events, now);
   return <section className="screen home">
     <p className="eyebrow date">{today.charAt(0).toUpperCase() + today.slice(1)}</p><h1>Buenas noches, Randy</h1><p className="lead">Tienes tu salud organizada para hoy.</p><span className="status-pill">Pastillero disponible muy pronto</span>
     <button className="sos"><span className="sos-icon">△</span><span><strong>SOS · Me siento mal</strong><small>Llama al 911 o avisa a tu contacto de emergencia</small></span><b>›</b></button>
@@ -98,7 +118,7 @@ function HomeView({ medicines, events, onAdd, onConfirm }: { medicines: Medicine
         <h2>Sin medicamentos</h2><span>Agrega tu primer medicamento para calcular los horarios.</span><button onClick={onAdd}><Plus /> Agregar medicamento</button><small>VITANEX organiza recordatorios; no determina indicaciones médicas.</small>
       </>}
     </article>
-    <article className="progress-card"><div><p>Cumplimiento semanal</p><strong>{weeklyPercent}%</strong></div><HeartPulse /><div className="weekly-track"><i style={{ width: weeklyPercent + "%" }} /></div><small>{medicines.length ? confirmedThisWeek + " dosis confirmadas durante los últimos 7 días." : "Agrega un medicamento para comenzar."}</small></article>
+    <article className="progress-card"><div><p>Cumplimiento semanal</p><strong>{weeklyPercent}%</strong></div><HeartPulse /><div className="weekly-track"><i style={{ width: weeklyPercent + "%" }} /></div><small>{medicines.length ? confirmedThisWeek + " dosis confirmadas durante los últimos 7 días." : "Agrega un medicamento para comenzar."}</small></article><article className="remaining-card"><div className="remaining-icon"><Pill /></div><div><p>Dosis pendientes de hoy</p><strong>{remainingToday}</strong><small>{remainingToday === 1 ? "dosis por tomar" : "dosis por tomar"}</small></div></article>
   </section>;
 }
 
@@ -111,7 +131,7 @@ function MedicineModal({ editing, onClose, onSave }: { editing: Medicine | null;
     <div className="modal-head"><div><p className="eyebrow">{editing ? "Actualizar tratamiento" : "Nuevo tratamiento"}</p><h2>{editing ? "Editar medicamento" : "Agregar medicamento"}</h2></div><button type="button" className="close" onClick={onClose}><X /></button></div>
     <label>Medicamento<input value={form.name} onChange={e => set("name", e.target.value)} placeholder="Ej. Paracetamol" required /></label>
     <label>Dosis prescrita<input value={form.dose} onChange={e => set("dose", e.target.value)} placeholder="Ej. 500 mg · 1 tableta" required /></label>
-    <div className="field-grid"><label>Hora de comienzo<input type="time" value={form.startTime} onChange={e => set("startTime", e.target.value)} required /></label><label>Frecuencia<select value={form.intervalHours} onChange={e => set("intervalHours", Number(e.target.value))}>{[1,2,3,4,5,6,8,12,24].map(h => <option key={h} value={h}>Cada {h} {h === 1 ? "hora" : "horas"}</option>)}</select></label><label>Pastillas disponibles<input type="number" min="0" value={form.stock} onChange={e => set("stock", Number(e.target.value))} /></label><label>Avisar cuando queden<input type="number" min="0" value={form.alertAt} onChange={e => set("alertAt", Number(e.target.value))} /></label></div>
+    <div className="field-grid"><label>Hora de comienzo<input type="time" value={form.startTime} onChange={e => set("startTime", e.target.value)} required /></label><label>Frecuencia<select value={form.intervalHours} onChange={e => set("intervalHours", Number(e.target.value))}>{Array.from({length:24},(_,index)=>index+1).map(h => <option key={h} value={h}>Cada {h} {h === 1 ? "hora" : "horas"}</option>)}</select></label><label>Pastillas disponibles<input type="number" min="0" value={form.stock} onChange={e => set("stock", Number(e.target.value))} /></label><label>Avisar cuando queden<input type="number" min="0" value={form.alertAt} onChange={e => set("alertAt", Number(e.target.value))} /></label></div>
     <div className="schedule-preview"><strong>Próximos horarios</strong><div>{previews.map((time,index) => <span key={index}>{index === 0 ? "Siguiente: " : ""}{time}</span>)}</div></div>
     <p className="medical-note">Usa el horario y la frecuencia indicados en tu receta. VITANEX no prescribe medicamentos.</p><button className="save" type="submit">{editing ? "Guardar cambios" : "Guardar medicamento"}</button>
   </form></div>;
