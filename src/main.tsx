@@ -6,7 +6,7 @@ import { Bell, Check, HeartPulse, History, Home, PackageOpen, Pencil, Pill, Plus
 import "./styles.css";
 
 type Tab = "inicio" | "medicinas" | "historial" | "pastillero" | "perfil";
-type Medicine = { id: string; name: string; dose: string; startTime: string; intervalHours: number; stock: number; alertAt: number };
+type Medicine = { id: string; name: string; dose: string; startTime: string; intervalHours: number; stock: number; alertAt: number; createdAt?: string };
 type FormData = Omit<Medicine, "id">;
 type DoseEvent = { id: string; medicineId: string; medicineName: string; dose: string; scheduledAt: string; takenAt: string };
 type ScheduledDose = { medicine: Medicine; date: Date };
@@ -75,6 +75,15 @@ function HomeView({ medicines, events, onAdd, onConfirm }: { medicines: Medicine
   const scheduled = group[0]?.date;
   const active = scheduled ? now.getTime() >= scheduled.getTime() - 5 * 60000 : false;
   const minutes = scheduled ? Math.max(0, Math.ceil((scheduled.getTime() - now.getTime()) / 60000)) : 0;
+  const weekStart = new Date(now.getTime() - 7 * 86400000);
+  const confirmedThisWeek = events.filter(event => new Date(event.scheduledAt) >= weekStart).length;
+  const expectedThisWeek = medicines.reduce((total, medicine) => {
+    const created = medicine.createdAt ? new Date(medicine.createdAt) : now;
+    const trackingStart = created > weekStart ? created : weekStart;
+    const elapsedHours = Math.max(0, (now.getTime() - trackingStart.getTime()) / 3600000);
+    return total + Math.floor(elapsedHours / medicine.intervalHours);
+  }, 0);
+  const weeklyPercent = expectedThisWeek ? Math.min(100, Math.round(confirmedThisWeek / expectedThisWeek * 100)) : 0;
   return <section className="screen home">
     <p className="eyebrow date">{today.charAt(0).toUpperCase() + today.slice(1)}</p><h1>Buenas noches, Randy</h1><p className="lead">Tienes tu salud organizada para hoy.</p><span className="status-pill">Pastillero disponible muy pronto</span>
     <button className="sos"><span className="sos-icon">△</span><span><strong>SOS · Me siento mal</strong><small>Llama al 911 o avisa a tu contacto de emergencia</small></span><b>›</b></button>
@@ -89,7 +98,7 @@ function HomeView({ medicines, events, onAdd, onConfirm }: { medicines: Medicine
         <h2>Sin medicamentos</h2><span>Agrega tu primer medicamento para calcular los horarios.</span><button onClick={onAdd}><Plus /> Agregar medicamento</button><small>VITANEX organiza recordatorios; no determina indicaciones médicas.</small>
       </>}
     </article>
-    <article className="progress-card"><div><p>Dosis confirmadas</p><strong>{events.length}</strong></div><Pill /><small>{medicines.length ? "Tus tratamientos están guardados en este dispositivo." : "Agrega un medicamento para comenzar."}</small></article>
+    <article className="progress-card"><div><p>Cumplimiento semanal</p><strong>{weeklyPercent}%</strong></div><HeartPulse /><div className="weekly-track"><i style={{ width: weeklyPercent + "%" }} /></div><small>{medicines.length ? confirmedThisWeek + " dosis confirmadas durante los últimos 7 días." : "Agrega un medicamento para comenzar."}</small></article>
   </section>;
 }
 
@@ -135,7 +144,7 @@ function App() {
     if(notifications.length) LocalNotifications.schedule({notifications}).catch(()=>{});
   },[medicines,events,loaded]);
   const openAdd=()=>{setEditing(null);setModal(true);};
-  const save=(data:FormData)=>{if(editing)setMedicines(items=>items.map(item=>item.id===editing.id?{...data,id:item.id}:item));else setMedicines(items=>[...items,{...data,id:crypto.randomUUID()}]);setModal(false);setEditing(null);setTab("medicinas");};
+  const save=(data:FormData)=>{if(editing)setMedicines(items=>items.map(item=>item.id===editing.id?{...data,id:item.id}:item));else setMedicines(items=>[...items,{...data,id:crypto.randomUUID(),createdAt:new Date().toISOString()}]);setModal(false);setEditing(null);setTab("medicinas");};
   const remove=(m:Medicine)=>{if(window.confirm(`¿Eliminar ${m.name}?`))setMedicines(items=>items.filter(item=>item.id!==m.id));};
   const confirm=(group:ScheduledDose[])=>{const takenAt=new Date().toISOString();const additions=group.map(item=>({id:slotKey(item.medicine.id,item.date),medicineId:item.medicine.id,medicineName:item.medicine.name,dose:item.medicine.dose,scheduledAt:item.date.toISOString(),takenAt}));setEvents(items=>[...items,...additions.filter(a=>!items.some(e=>e.id===a.id))]);setMedicines(items=>items.map(m=>group.some(g=>g.medicine.id===m.id)?{...m,stock:Math.max(0,m.stock-1)}:m));playVitanexTone();};
   return <main className="app"><Header />{tab==="inicio"&&<HomeView medicines={medicines} events={events} onAdd={()=>{setTab("medicinas");openAdd();}} onConfirm={confirm}/>} {tab==="medicinas"&&<MedicinesView medicines={medicines} onAdd={openAdd} onEdit={m=>{setEditing(m);setModal(true);}} onDelete={remove}/>} {tab==="historial"&&<HistoryView events={events}/>} {(tab==="pastillero"||tab==="perfil")&&<SimpleView tab={tab}/>}<nav className="bottom-nav">{navItems.map(({id,icon:Icon,label})=><button key={id} className={tab===id?"active":""} onClick={()=>setTab(id)}><Icon/><small>{label}</small></button>)}</nav>{modal&&<MedicineModal editing={editing} onClose={()=>{setModal(false);setEditing(null);}} onSave={save}/>}</main>;
