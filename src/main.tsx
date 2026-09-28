@@ -7,7 +7,7 @@ import "./styles.css";
 
 type Tab = "inicio" | "medicinas" | "historial" | "pastillero" | "perfil";
 type Medicine = { id: string; name: string; dose: string; startTime: string; intervalHours: number; stock: number; alertAt: number; createdAt?: string };
-type FormData = Omit<Medicine, "id">;
+type FormData = Omit<Medicine, "id" | "createdAt">;
 type DoseEvent = { id: string; medicineId: string; medicineName: string; dose: string; scheduledAt: string; takenAt: string };
 type ScheduledDose = { medicine: Medicine; date: Date };
 const MEDICINES_KEY = "vitanex_medicines_v1";
@@ -144,7 +144,7 @@ function App() {
     if(notifications.length) LocalNotifications.schedule({notifications}).catch(()=>{});
   },[medicines,events,loaded]);
   const openAdd=()=>{setEditing(null);setModal(true);};
-  const save=(data:FormData)=>{if(editing)setMedicines(items=>items.map(item=>item.id===editing.id?{...data,id:item.id}:item));else setMedicines(items=>[...items,{...data,id:crypto.randomUUID(),createdAt:new Date().toISOString()}]);setModal(false);setEditing(null);setTab("medicinas");};
+  const save=(data:FormData)=>{if(editing)setMedicines(items=>items.map(item=>item.id===editing.id?{...data,id:item.id,createdAt:item.createdAt}:item));else setMedicines(items=>[...items,{...data,id:crypto.randomUUID(),createdAt:new Date().toISOString()}]);setModal(false);setEditing(null);setTab("medicinas");};
   const remove=(m:Medicine)=>{if(window.confirm(`¿Eliminar ${m.name}?`))setMedicines(items=>items.filter(item=>item.id!==m.id));};
   const confirm=(group:ScheduledDose[])=>{const takenAt=new Date().toISOString();const additions=group.map(item=>({id:slotKey(item.medicine.id,item.date),medicineId:item.medicine.id,medicineName:item.medicine.name,dose:item.medicine.dose,scheduledAt:item.date.toISOString(),takenAt}));setEvents(items=>[...items,...additions.filter(a=>!items.some(e=>e.id===a.id))]);setMedicines(items=>items.map(m=>group.some(g=>g.medicine.id===m.id)?{...m,stock:Math.max(0,m.stock-1)}:m));playVitanexTone();};
   return <main className="app"><Header />{tab==="inicio"&&<HomeView medicines={medicines} events={events} onAdd={()=>{setTab("medicinas");openAdd();}} onConfirm={confirm}/>} {tab==="medicinas"&&<MedicinesView medicines={medicines} onAdd={openAdd} onEdit={m=>{setEditing(m);setModal(true);}} onDelete={remove}/>} {tab==="historial"&&<HistoryView events={events}/>} {(tab==="pastillero"||tab==="perfil")&&<SimpleView tab={tab}/>}<nav className="bottom-nav">{navItems.map(({id,icon:Icon,label})=><button key={id} className={tab===id?"active":""} onClick={()=>setTab(id)}><Icon/><small>{label}</small></button>)}</nav>{modal&&<MedicineModal editing={editing} onClose={()=>{setModal(false);setEditing(null);}} onSave={save}/>}</main>;
