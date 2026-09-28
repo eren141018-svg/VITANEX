@@ -77,7 +77,7 @@ function EmptyScreen({ tab, openTutorial }: { tab: Tab; openTutorial: () => void
       <h2>{tab === "medicinas" ? "Comienza tu tratamiento" : "Estamos preparando esta sección"}</h2>
       <p>{info.text}</p>
       {tab === "medicinas" && <button>＋ Agregar medicamento</button>}
-      {tab === "perfil" && <button onClick={openTutorial}>Ver tutorial nuevamente</button>}
+      {tab === "perfil" && <p className="coming-soon">El tutorial completo se habilitará cuando terminemos la aplicación.</p>}
     </article>
   </section>;
 }
@@ -127,11 +127,7 @@ function App() {
   const [tab, setTab] = useState<Tab>("inicio");
   const [tutorial, setTutorial] = useState(false);
 
-  useEffect(() => {
-    Preferences.get({ key: "vitanex_tutorial_seen" }).then(({ value }) => {
-      if (value !== "true") setTutorial(true);
-    });
-  }, []);
+  // El tutorial se activará cuando las funciones principales estén terminadas.
 
   return <main className="app">
     <Header />
