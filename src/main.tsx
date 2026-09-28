@@ -8,7 +8,7 @@ import "./styles.css";
 type Tab = "inicio" | "medicinas" | "historial" | "pastillero" | "perfil";
 type Medicine = { id: string; name: string; dose: string; startTime: string; intervalHours: number; stock: number; alertAt: number; createdAt?: string };
 type FormData = Omit<Medicine, "id" | "createdAt">;
-type DoseEvent = { id: string; medicineId: string; medicineName: string; dose: string; scheduledAt: string; takenAt: string };
+type DoseEvent = { id: string; medicineId: string; medicineName: string; dose: string; scheduledAt: string; takenAt: string; status?: "taken" | "omitted" };
 type ScheduledDose = { medicine: Medicine; date: Date };
 const MEDICINES_KEY = "vitanex_medicines_v1";
 const EVENTS_KEY = "vitanex_dose_events_v1";
@@ -87,7 +87,7 @@ function Header() {
   return <header className="topbar"><div className="brand-heart"><HeartPulse /></div><div className="brand"><strong>VITANEX</strong><small>Tu salud, siempre a tiempo</small></div><button className="bell" aria-label="Notificaciones"><Bell /></button></header>;
 }
 
-function HomeView({ medicines, events, onAdd, onConfirm, onSOS }: { medicines: Medicine[]; events: DoseEvent[]; onAdd: () => void; onConfirm: (group: ScheduledDose[]) => void; onSOS: () => void }) {
+function HomeView({ medicines, events, onAdd, onConfirm, onSOS }: { medicines: Medicine[]; events: DoseEvent[]; onAdd: () => void; onConfirm: (dose: ScheduledDose) => void; onSOS: () => void }) {
   const [now, setNow] = useState(new Date());
   useEffect(() => { const timer = window.setInterval(() => setNow(new Date()), 15000); return () => window.clearInterval(timer); }, []);
   const today = new Intl.DateTimeFormat("es-EC", { weekday: "long", day: "numeric", month: "long" }).format(now);
@@ -96,7 +96,7 @@ function HomeView({ medicines, events, onAdd, onConfirm, onSOS }: { medicines: M
   const active = scheduled ? now.getTime() >= scheduled.getTime() - 5 * 60000 && now.getTime() <= scheduled.getTime() + 30 * 60000 : false;
   const minutes = scheduled ? Math.max(0, Math.ceil((scheduled.getTime() - now.getTime()) / 60000)) : 0;
   const weekStart = new Date(now.getTime() - 7 * 86400000);
-  const confirmedThisWeek = events.filter(event => new Date(event.scheduledAt) >= weekStart).length;
+  const confirmedThisWeek = events.filter(event => event.status !== "omitted" && new Date(event.scheduledAt) >= weekStart).length;
   const expectedThisWeek = medicines.reduce((total, medicine) => {
     const created = medicine.createdAt ? new Date(medicine.createdAt) : now;
     const trackingStart = created > weekStart ? created : weekStart;
@@ -111,9 +111,8 @@ function HomeView({ medicines, events, onAdd, onConfirm, onSOS }: { medicines: M
       <div className="dose-art"><i></i><i></i><span>♥</span></div><p>◷ &nbsp; Próxima dosis</p>
       {group.length ? <>
         <h2>{timeLabel(group[0].date)}</h2>
-        <div className="due-medicines">{group.map(item => <div key={item.medicine.id}><h3>{item.medicine.name}</h3><span>{item.medicine.dose}</span></div>)}</div>
-        <button className={active ? "confirm-dose active" : "confirm-dose"} disabled={!active} onClick={() => onConfirm(group)}><Check />{active ? (group.length > 1 ? "Ya me las tomé" : "Ya me la tomé") : `Disponible en ${minutes} min`}</button>
-        <small>{active ? "Confirma únicamente después de tomar la dosis." : "El botón se activa cinco minutos antes."}</small>
+        <div className="due-medicines">{group.map(item => <div className="due-item" key={item.medicine.id}><h3>{item.medicine.name}</h3><span>{item.medicine.dose}</span><button className={active ? "confirm-dose active" : "confirm-dose"} disabled={!active} onClick={() => onConfirm(item)}><Check />{active ? "Confirmar toma" : `Disponible desde ${timeLabel(new Date(item.date.getTime()-5*60000))}`}</button></div>)}</div>
+        <small>{group.length > 1 ? group.length + " medicamentos programados a la misma hora. Confirma cada uno." : (active ? "Confirma únicamente después de tomar la dosis." : "El botón se activa cinco minutos antes.")}</small>
       </> : <>
         <h2>Sin medicamentos</h2><span>Agrega tu primer medicamento para calcular los horarios.</span><button onClick={onAdd}><Plus /> Agregar medicamento</button><small>VITANEX organiza recordatorios; no determina indicaciones médicas.</small>
       </>}
@@ -153,6 +152,20 @@ function SimpleView({ tab }: { tab: "pastillero" | "perfil" }) {
   const [eyebrow,title,text,Icon]=data; return <section className="screen simple"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><article className="empty-card"><span className="empty-icon"><Icon /></span><h2>Estamos preparando esta sección</h2><p>{text}</p></article></section>;
 }
 
+function DoseConfirmModal({ dose, onClose, onTaken, onSnooze, onOmit }: { dose: ScheduledDose; onClose: () => void; onTaken: (takenAt: Date) => void; onSnooze: (minutes: number) => void; onOmit: () => void }) {
+  const now=new Date(); const [customTime,setCustomTime]=useState(timeLabel(now));
+  const confirmCustom=()=>{const [hours,minutes]=customTime.split(":").map(Number);const selected=new Date();selected.setHours(hours,minutes,0,0);onTaken(selected);};
+  return <div className="modal-backdrop"><section className="confirm-modal">
+    <div className="modal-head"><div><p className="eyebrow">Confirmar la toma</p><h2>{dose.medicine.name}</h2><small>{dose.medicine.dose}</small></div><button className="close" onClick={onClose}><X/></button></div>
+    <p>Registra la hora real, pospón el recordatorio o marca la dosis como omitida.</p>
+    <button className="take-now" onClick={()=>onTaken(new Date())}><Check/> La tomé ahora ({timeLabel(now)})</button>
+    <label>Hora en que la tomaste<input type="time" value={customTime} onChange={event=>setCustomTime(event.target.value)}/></label>
+    <button className="custom-time" onClick={confirmCustom}>Confirmar otra hora</button>
+    <strong className="remind-label">Recordarme después</strong><div className="snooze-row">{[5,10,15].map(value=><button key={value} onClick={()=>onSnooze(value)}>{value} min</button>)}</div>
+    <button className="omit-dose" onClick={onOmit}>Marcar como omitida</button><button className="cancel-confirm" onClick={onClose}>Cancelar</button>
+  </section></div>;
+}
+
 function SOSModal({ onClose }: { onClose: () => void }) {
   const [countdown,setCountdown]=useState(5);
   useEffect(()=>{if(countdown<=0)return;const timer=window.setTimeout(()=>setCountdown(value=>value-1),1000);return()=>window.clearTimeout(timer);},[countdown]);
@@ -165,7 +178,7 @@ function SOSModal({ onClose }: { onClose: () => void }) {
 }
 
 function App() {
-  const [tab,setTab]=useState<Tab>("inicio"); const [medicines,setMedicines]=useState<Medicine[]>([]); const [events,setEvents]=useState<DoseEvent[]>([]); const [loaded,setLoaded]=useState(false); const [modal,setModal]=useState(false); const [sosOpen,setSosOpen]=useState(false); const [editing,setEditing]=useState<Medicine|null>(null);
+  const [tab,setTab]=useState<Tab>("inicio"); const [medicines,setMedicines]=useState<Medicine[]>([]); const [events,setEvents]=useState<DoseEvent[]>([]); const [loaded,setLoaded]=useState(false); const [modal,setModal]=useState(false); const [doseToConfirm,setDoseToConfirm]=useState<ScheduledDose|null>(null); const [sosOpen,setSosOpen]=useState(false); const [editing,setEditing]=useState<Medicine|null>(null);
   useEffect(() => {
     Promise.all([Preferences.get({key:MEDICINES_KEY}),Preferences.get({key:EVENTS_KEY})]).then(([m,e]) => { try{if(m.value)setMedicines(JSON.parse(m.value));}catch{} try{if(e.value)setEvents(JSON.parse(e.value));}catch{} setLoaded(true); });
     LocalNotifications.requestPermissions().then(()=>LocalNotifications.createChannel({id:"vitanex-reminders",name:"Recordatorios VITANEX",description:"Alarmas para las dosis de medicamentos",importance:5,visibility:1,vibration:true})).catch(()=>{});
@@ -198,7 +211,9 @@ function App() {
   const openAdd=()=>{setEditing(null);setModal(true);};
   const save=(data:FormData)=>{if(editing)setMedicines(items=>items.map(item=>item.id===editing.id?{...data,id:item.id,createdAt:item.createdAt}:item));else setMedicines(items=>[...items,{...data,id:crypto.randomUUID(),createdAt:new Date().toISOString()}]);setModal(false);setEditing(null);setTab("medicinas");};
   const remove=(m:Medicine)=>{if(window.confirm(`¿Eliminar ${m.name}?`))setMedicines(items=>items.filter(item=>item.id!==m.id));};
-  const confirm=(group:ScheduledDose[])=>{const takenAt=new Date().toISOString();const additions=group.map(item=>({id:slotKey(item.medicine.id,item.date),medicineId:item.medicine.id,medicineName:item.medicine.name,dose:item.medicine.dose,scheduledAt:item.date.toISOString(),takenAt}));setEvents(items=>[...items,...additions.filter(a=>!items.some(e=>e.id===a.id))]);setMedicines(items=>items.map(m=>group.some(g=>g.medicine.id===m.id)?{...m,stock:Math.max(0,m.stock-1)}:m));playVitanexTone();};
-  return <main className="app"><Header />{tab==="inicio"&&<HomeView medicines={medicines} events={events} onAdd={()=>{setTab("medicinas");openAdd();}} onConfirm={confirm} onSOS={()=>setSosOpen(true)}/>} {tab==="medicinas"&&<MedicinesView medicines={medicines} onAdd={openAdd} onEdit={m=>{setEditing(m);setModal(true);}} onDelete={remove}/>} {tab==="historial"&&<HistoryView events={events}/>} {(tab==="pastillero"||tab==="perfil")&&<SimpleView tab={tab}/>}<nav className="bottom-nav">{navItems.map(({id,icon:Icon,label})=><button key={id} className={tab===id?"active":""} onClick={()=>setTab(id)}><Icon/><small>{label}</small></button>)}</nav>{modal&&<MedicineModal editing={editing} onClose={()=>{setModal(false);setEditing(null);}} onSave={save}/>} {sosOpen&&<SOSModal onClose={()=>setSosOpen(false)}/>}</main>;
+  const confirmTaken=(item:ScheduledDose,taken:Date)=>{const event:DoseEvent={id:slotKey(item.medicine.id,item.date),medicineId:item.medicine.id,medicineName:item.medicine.name,dose:item.medicine.dose,scheduledAt:item.date.toISOString(),takenAt:taken.toISOString(),status:"taken"};setEvents(items=>items.some(e=>e.id===event.id)?items:[...items,event]);setMedicines(items=>items.map(m=>m.id===item.medicine.id?{...m,stock:Math.max(0,m.stock-1)}:m));setDoseToConfirm(null);playVitanexTone();};
+  const omitDose=(item:ScheduledDose)=>{const event:DoseEvent={id:slotKey(item.medicine.id,item.date),medicineId:item.medicine.id,medicineName:item.medicine.name,dose:item.medicine.dose,scheduledAt:item.date.toISOString(),takenAt:new Date().toISOString(),status:"omitted"};setEvents(items=>items.some(e=>e.id===event.id)?items:[...items,event]);setDoseToConfirm(null);};
+  const snoozeDose=async(item:ScheduledDose,minutes:number)=>{const at=new Date(Date.now()+minutes*60000);try{await LocalNotifications.schedule({notifications:[{id:(Date.now()%1000000000)+1,title:"VITANEX · Recordatorio pospuesto",body:`${item.medicine.name} · ${item.medicine.dose}`,channelId:"vitanex-reminders",schedule:{at,allowWhileIdle:true}}]});}catch{}setDoseToConfirm(null);};
+  return <main className="app"><Header />{tab==="inicio"&&<HomeView medicines={medicines} events={events} onAdd={()=>{setTab("medicinas");openAdd();}} onConfirm={setDoseToConfirm} onSOS={()=>setSosOpen(true)}/>} {tab==="medicinas"&&<MedicinesView medicines={medicines} onAdd={openAdd} onEdit={m=>{setEditing(m);setModal(true);}} onDelete={remove}/>} {tab==="historial"&&<HistoryView events={events}/>} {(tab==="pastillero"||tab==="perfil")&&<SimpleView tab={tab}/>}<nav className="bottom-nav">{navItems.map(({id,icon:Icon,label})=><button key={id} className={tab===id?"active":""} onClick={()=>setTab(id)}><Icon/><small>{label}</small></button>)}</nav>{modal&&<MedicineModal editing={editing} onClose={()=>{setModal(false);setEditing(null);}} onSave={save}/>} {doseToConfirm&&<DoseConfirmModal dose={doseToConfirm} onClose={()=>setDoseToConfirm(null)} onTaken={time=>confirmTaken(doseToConfirm,time)} onSnooze={minutes=>snoozeDose(doseToConfirm,minutes)} onOmit={()=>omitDose(doseToConfirm)}/>} {sosOpen&&<SOSModal onClose={()=>setSosOpen(false)}/>}</main>;
 }
 createRoot(document.getElementById("root")!).render(<React.StrictMode><App/></React.StrictMode>);
