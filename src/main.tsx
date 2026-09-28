@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Preferences } from "@capacitor/preferences";
 import { LocalNotifications } from "@capacitor/local-notifications";
-import { AlertTriangle, Bell, Check, HeartPulse, History, Home, PackageOpen, Pencil, Phone, Pill, Plus, Trash2, UserRound, X } from "lucide-react";
+import { AlertTriangle, Bell, Check, HeartPulse, History, Home, MapPin, MessageCircle, PackageOpen, Pencil, Phone, Pill, Plus, Save, Trash2, UserRound, X } from "lucide-react";
 import "./styles.css";
 
 type Tab = "inicio" | "medicinas" | "historial" | "pastillero" | "perfil";
@@ -10,8 +10,11 @@ type Medicine = { id: string; name: string; dose: string; startTime: string; int
 type FormData = Omit<Medicine, "id" | "createdAt">;
 type DoseEvent = { id: string; medicineId: string; medicineName: string; dose: string; scheduledAt: string; takenAt: string; status?: "taken" | "omitted" };
 type ScheduledDose = { medicine: Medicine; date: Date };
+type Profile = { userName: string; userPhone: string; contactName: string; contactPhone: string; relationship: string };
 const MEDICINES_KEY = "vitanex_medicines_v1";
 const EVENTS_KEY = "vitanex_dose_events_v1";
+const PROFILE_KEY = "vitanex_profile_v1";
+const defaultProfile: Profile = { userName: "Randy", userPhone: "", contactName: "", contactPhone: "", relationship: "" };
 const blankForm: FormData = { name: "", dose: "", startTime: "08:00", intervalHours: 8, stock: 10, alertAt: 2 };
 
 const navItems = [
@@ -147,9 +150,17 @@ function HistoryView({ events }: { events: DoseEvent[] }) {
   const ordered = [...events].sort((a,b) => b.takenAt.localeCompare(a.takenAt));
   return <section className="screen"><p className="eyebrow">Tu progreso</p><h1>Historial</h1>{!ordered.length ? <article className="empty-card"><span className="empty-icon"><History /></span><h2>Sin dosis confirmadas</h2><p>Cuando confirmes una dosis aparecerá aquí.</p></article> : <div className="history-list">{ordered.map(event => <article key={event.id}><span className="history-check"><Check /></span><div><strong>{event.medicineName}</strong><p>{event.dose}</p><small>Programada: {new Date(event.scheduledAt).toLocaleString("es-EC")} · Tomada: {new Date(event.takenAt).toLocaleTimeString("es-EC",{hour:"2-digit",minute:"2-digit"})}</small></div></article>)}</div>}</section>;
 }
-function SimpleView({ tab }: { tab: "pastillero" | "perfil" }) {
-  const data = tab === "pastillero" ? ["Dispositivo físico","Pastillero VITANEX","La conexión con VITANEX Box estará disponible muy pronto.",PackageOpen] as const : ["Tu cuenta","Perfil","Próximamente podrás guardar y sincronizar tus datos.",UserRound] as const;
-  const [eyebrow,title,text,Icon]=data; return <section className="screen simple"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><article className="empty-card"><span className="empty-icon"><Icon /></span><h2>Estamos preparando esta sección</h2><p>{text}</p></article></section>;
+function PastilleroView() {
+  return <section className="screen simple"><p className="eyebrow">Dispositivo físico</p><h1>Pastillero VITANEX</h1><article className="empty-card"><span className="empty-icon"><PackageOpen/></span><h2>Disponible muy pronto</h2><p>La conexión con VITANEX Box está en desarrollo.</p></article></section>;
+}
+function ProfileView({ profile, onChange, onSave }: { profile: Profile; onChange: (profile: Profile) => void; onSave: () => void }) {
+  const set=(key:keyof Profile,value:string)=>onChange({...profile,[key]:value});
+  return <section className="screen profile-screen"><p className="eyebrow">Tu cuenta</p><h1>Perfil</h1>
+    <article className="profile-card"><div className="profile-avatar"><UserRound/></div><div><h2>{profile.userName || "Tu nombre"}</h2><p>Información guardada únicamente en este dispositivo.</p></div></article>
+    <article className="profile-form"><h2>Datos personales</h2><label>Tu nombre<input value={profile.userName} onChange={e=>set("userName",e.target.value)} placeholder="Nombre"/></label><label>Tu número celular<input inputMode="tel" value={profile.userPhone} onChange={e=>set("userPhone",e.target.value)} placeholder="Ej. 0991234567"/></label>
+      <h2>Contacto de confianza</h2><p>VITANEX solo abrirá la llamada o el mensaje cuando tú lo elijas.</p><label>Nombre del contacto<input value={profile.contactName} onChange={e=>set("contactName",e.target.value)} placeholder="Ej. Mamá"/></label><label>Número celular<input inputMode="tel" value={profile.contactPhone} onChange={e=>set("contactPhone",e.target.value)} placeholder="Ej. 0991234567"/></label><label>Relación<input value={profile.relationship} onChange={e=>set("relationship",e.target.value)} placeholder="Ej. Familiar"/></label>
+      <button className="save-profile" onClick={onSave}><Save/> Guardar perfil</button>
+    </article></section>;
 }
 
 function DoseConfirmModal({ dose, onClose, onTaken, onSnooze, onOmit }: { dose: ScheduledDose; onClose: () => void; onTaken: (takenAt: Date) => void; onSnooze: (minutes: number) => void; onOmit: () => void }) {
@@ -166,25 +177,40 @@ function DoseConfirmModal({ dose, onClose, onTaken, onSnooze, onOmit }: { dose: 
   </section></div>;
 }
 
-function SOSModal({ onClose }: { onClose: () => void }) {
-  const [countdown,setCountdown]=useState(5);
+function SOSModal({ onClose, profile, onConfigure }: { onClose: () => void; profile: Profile; onConfigure: () => void }) {
+  const [countdown,setCountdown]=useState(5); const [status,setStatus]=useState("");
   useEffect(()=>{if(countdown<=0)return;const timer=window.setTimeout(()=>setCountdown(value=>value-1),1000);return()=>window.clearTimeout(timer);},[countdown]);
-  const call911=()=>{window.location.href="tel:911";};
+  const call=(phone:string)=>{window.location.href="tel:"+phone;};
+  const sendLocation=()=>{
+    if(!profile.contactPhone){setStatus("Primero configura un contacto de confianza.");return;}
+    setStatus("Obteniendo tu ubicación…");
+    navigator.geolocation.getCurrentPosition(position=>{
+      const map=`https://maps.google.com/?q=${position.coords.latitude},${position.coords.longitude}`;
+      const message=`Alerta de VITANEX: ${profile.userName || "La persona"} indicó que se siente mal. Ubicación: ${map}. Por favor, comunícate cuanto antes.`;
+      setStatus("Se abrirá Mensajes. Revisa y pulsa Enviar.");
+      window.location.href=`sms:${profile.contactPhone}?body=${encodeURIComponent(message)}`;
+    },()=>{
+      const message=`Alerta de VITANEX: ${profile.userName || "La persona"} indicó que se siente mal. No fue posible obtener su ubicación. Por favor, comunícate cuanto antes.`;
+      setStatus("No se obtuvo la ubicación. Se abrirá un mensaje sin ella.");
+      window.location.href=`sms:${profile.contactPhone}?body=${encodeURIComponent(message)}`;
+    },{enableHighAccuracy:true,timeout:12000,maximumAge:30000});
+  };
   return <div className="modal-backdrop sos-backdrop"><section className="sos-modal">
-    <div className="modal-head"><div><p className="eyebrow emergency">Asistencia de emergencia</p><h2><AlertTriangle/> ¿Te sientes mal?</h2></div><button className="close" onClick={onClose}><X/></button></div>
+    <div className="modal-head"><div className="emergency-title"><span className="emergency-logo">+</span><div><p className="eyebrow emergency">Asistencia de emergencia</p><h2>¿Te sientes mal?</h2></div></div><button className="close" onClick={onClose}><X/></button></div>
     <p>Si existe peligro inmediato, llama al ECU 911. VITANEX no reemplaza a los servicios de emergencia.</p>
-    {countdown>0?<div className="sos-countdown"><small>Espera para evitar una pulsación accidental</small><strong>{countdown}</strong><button onClick={onClose}>Cancelar alerta</button></div>:<div className="sos-options"><p>Elige qué deseas hacer. VITANEX no llamará automáticamente.</p><button className="call-911" onClick={call911}><Phone/> Llamar al 911</button><button className="cancel-sos" onClick={onClose}>Estoy bien, cancelar</button></div>}
+    {countdown>0?<div className="sos-countdown"><small>Espera para evitar una pulsación accidental</small><strong>{countdown}</strong><button onClick={onClose}>Cancelar alerta</button></div>:<div className="sos-options"><p>Elige una acción. Nada se enviará automáticamente.</p><button className="call-911" onClick={()=>call("911")}><Phone/> Llamar al 911</button>{profile.contactPhone?<><button className="call-contact" onClick={()=>call(profile.contactPhone)}><Phone/> Llamar a {profile.contactName || "mi contacto"}</button><button className="share-location" onClick={sendLocation}><MapPin/> Enviar ubicación por SMS</button></>:<button className="configure-contact" onClick={onConfigure}><UserRound/> Configurar contacto de confianza</button>}<button className="cancel-sos" onClick={onClose}>Estoy bien, cancelar</button>{status&&<small className="sos-status">{status}</small>}</div>}
   </section></div>;
 }
 
 function App() {
-  const [tab,setTab]=useState<Tab>("inicio"); const [medicines,setMedicines]=useState<Medicine[]>([]); const [events,setEvents]=useState<DoseEvent[]>([]); const [loaded,setLoaded]=useState(false); const [modal,setModal]=useState(false); const [doseToConfirm,setDoseToConfirm]=useState<ScheduledDose|null>(null); const [sosOpen,setSosOpen]=useState(false); const [editing,setEditing]=useState<Medicine|null>(null);
+  const [tab,setTab]=useState<Tab>("inicio"); const [profile,setProfile]=useState<Profile>(defaultProfile); const [profileSaved,setProfileSaved]=useState(false); const [medicines,setMedicines]=useState<Medicine[]>([]); const [events,setEvents]=useState<DoseEvent[]>([]); const [loaded,setLoaded]=useState(false); const [modal,setModal]=useState(false); const [doseToConfirm,setDoseToConfirm]=useState<ScheduledDose|null>(null); const [sosOpen,setSosOpen]=useState(false); const [editing,setEditing]=useState<Medicine|null>(null);
   useEffect(() => {
-    Promise.all([Preferences.get({key:MEDICINES_KEY}),Preferences.get({key:EVENTS_KEY})]).then(([m,e]) => { try{if(m.value)setMedicines(JSON.parse(m.value));}catch{} try{if(e.value)setEvents(JSON.parse(e.value));}catch{} setLoaded(true); });
+    Promise.all([Preferences.get({key:MEDICINES_KEY}),Preferences.get({key:EVENTS_KEY}),Preferences.get({key:PROFILE_KEY})]).then(([m,e,p]) => { try{if(m.value)setMedicines(JSON.parse(m.value));}catch{} try{if(e.value)setEvents(JSON.parse(e.value));}catch{} try{if(p.value)setProfile(JSON.parse(p.value));}catch{} setLoaded(true); });
     LocalNotifications.requestPermissions().then(()=>LocalNotifications.createChannel({id:"vitanex-reminders",name:"Recordatorios VITANEX",description:"Alarmas para las dosis de medicamentos",importance:5,visibility:1,vibration:true})).catch(()=>{});
   },[]);
   useEffect(() => { if(loaded) Preferences.set({key:MEDICINES_KEY,value:JSON.stringify(medicines)}); },[medicines,loaded]);
   useEffect(() => { if(loaded) Preferences.set({key:EVENTS_KEY,value:JSON.stringify(events)}); },[events,loaded]);
+  const saveProfile=async()=>{await Preferences.set({key:PROFILE_KEY,value:JSON.stringify(profile)});setProfileSaved(true);window.setTimeout(()=>setProfileSaved(false),1800);};
   useEffect(() => {
     if(!loaded) return;
     const program=async()=>{
@@ -214,6 +240,6 @@ function App() {
   const confirmTaken=(item:ScheduledDose,taken:Date)=>{const event:DoseEvent={id:slotKey(item.medicine.id,item.date),medicineId:item.medicine.id,medicineName:item.medicine.name,dose:item.medicine.dose,scheduledAt:item.date.toISOString(),takenAt:taken.toISOString(),status:"taken"};setEvents(items=>items.some(e=>e.id===event.id)?items:[...items,event]);setMedicines(items=>items.map(m=>m.id===item.medicine.id?{...m,stock:Math.max(0,m.stock-1)}:m));setDoseToConfirm(null);playVitanexTone();};
   const omitDose=(item:ScheduledDose)=>{const event:DoseEvent={id:slotKey(item.medicine.id,item.date),medicineId:item.medicine.id,medicineName:item.medicine.name,dose:item.medicine.dose,scheduledAt:item.date.toISOString(),takenAt:new Date().toISOString(),status:"omitted"};setEvents(items=>items.some(e=>e.id===event.id)?items:[...items,event]);setDoseToConfirm(null);};
   const snoozeDose=async(item:ScheduledDose,minutes:number)=>{const at=new Date(Date.now()+minutes*60000);try{await LocalNotifications.schedule({notifications:[{id:(Date.now()%1000000000)+1,title:"VITANEX · Recordatorio pospuesto",body:`${item.medicine.name} · ${item.medicine.dose}`,channelId:"vitanex-reminders",schedule:{at,allowWhileIdle:true}}]});}catch{}setDoseToConfirm(null);};
-  return <main className="app"><Header />{tab==="inicio"&&<HomeView medicines={medicines} events={events} onAdd={()=>{setTab("medicinas");openAdd();}} onConfirm={setDoseToConfirm} onSOS={()=>setSosOpen(true)}/>} {tab==="medicinas"&&<MedicinesView medicines={medicines} onAdd={openAdd} onEdit={m=>{setEditing(m);setModal(true);}} onDelete={remove}/>} {tab==="historial"&&<HistoryView events={events}/>} {(tab==="pastillero"||tab==="perfil")&&<SimpleView tab={tab}/>}<nav className="bottom-nav">{navItems.map(({id,icon:Icon,label})=><button key={id} className={tab===id?"active":""} onClick={()=>setTab(id)}><Icon/><small>{label}</small></button>)}</nav>{modal&&<MedicineModal editing={editing} onClose={()=>{setModal(false);setEditing(null);}} onSave={save}/>} {doseToConfirm&&<DoseConfirmModal dose={doseToConfirm} onClose={()=>setDoseToConfirm(null)} onTaken={time=>confirmTaken(doseToConfirm,time)} onSnooze={minutes=>snoozeDose(doseToConfirm,minutes)} onOmit={()=>omitDose(doseToConfirm)}/>} {sosOpen&&<SOSModal onClose={()=>setSosOpen(false)}/>}</main>;
+  return <main className="app"><Header />{tab==="inicio"&&<HomeView medicines={medicines} events={events} onAdd={()=>{setTab("medicinas");openAdd();}} onConfirm={setDoseToConfirm} onSOS={()=>setSosOpen(true)}/>} {tab==="medicinas"&&<MedicinesView medicines={medicines} onAdd={openAdd} onEdit={m=>{setEditing(m);setModal(true);}} onDelete={remove}/>} {tab==="historial"&&<HistoryView events={events}/>} {tab==="pastillero"&&<PastilleroView/>} {tab==="perfil"&&<ProfileView profile={profile} onChange={setProfile} onSave={saveProfile}/>}<nav className="bottom-nav">{navItems.map(({id,icon:Icon,label})=><button key={id} className={tab===id?"active":""} onClick={()=>setTab(id)}><Icon/><small>{label}</small></button>)}</nav>{modal&&<MedicineModal editing={editing} onClose={()=>{setModal(false);setEditing(null);}} onSave={save}/>} {doseToConfirm&&<DoseConfirmModal dose={doseToConfirm} onClose={()=>setDoseToConfirm(null)} onTaken={time=>confirmTaken(doseToConfirm,time)} onSnooze={minutes=>snoozeDose(doseToConfirm,minutes)} onOmit={()=>omitDose(doseToConfirm)}/>} {sosOpen&&<SOSModal profile={profile} onClose={()=>setSosOpen(false)} onConfigure={()=>{setSosOpen(false);setTab("perfil");}}/>} {profileSaved&&<div className="saved-toast"><Check/> Perfil guardado</div>}</main>;
 }
 createRoot(document.getElementById("root")!).render(<React.StrictMode><App/></React.StrictMode>);
