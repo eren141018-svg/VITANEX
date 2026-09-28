@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Preferences } from "@capacitor/preferences";
+import { HeartPulse } from "lucide-react";
 import "./styles.css";
 
 type Tab = "inicio" | "medicinas" | "historial" | "pastillero" | "perfil";
@@ -14,16 +15,16 @@ const navItems: { id: Tab; icon: string; label: string }[] = [
 ];
 
 const tutorialSteps = [
-  { title: "Bienvenido a VITANEX", text: "Te ayudaremos a organizar tus medicamentos y recordar cada dosis.", target: "Inicio" },
-  { title: "Tus medicamentos", text: "Aquí podrás agregar, editar y eliminar los medicamentos indicados por tu profesional de salud.", target: "Medicinas" },
-  { title: "Confirma cada dosis", text: "El botón se activará cinco minutos antes de la hora programada.", target: "Inicio" },
-  { title: "Consulta tu progreso", text: "En Historial verás las dosis confirmadas, pendientes y omitidas.", target: "Historial" },
-  { title: "Siempre podrás repetirlo", text: "Encontrarás este tutorial nuevamente dentro de Perfil.", target: "Perfil" },
+  { title: "Bienvenido a VITANEX", text: "Vamos a recorrer juntos las funciones principales.", target: "Comenzar", selector: ".brand-heart" },
+  { title: "Agrega tus medicamentos", text: "Pulsa aquí para registrar el nombre, la dosis y el horario indicado en tu receta.", target: "Medicinas", selector: '[data-tour="medicinas"]' },
+  { title: "Confirma cada dosis", text: "Esta tarjeta mostrará el próximo medicamento. El botón se activará cinco minutos antes.", target: "Próxima dosis", selector: ".dose-card" },
+  { title: "Consulta tu progreso", text: "En Historial podrás revisar las dosis confirmadas, pendientes y omitidas.", target: "Historial", selector: '[data-tour="historial"]' },
+  { title: "Ayuda de emergencia", text: "Si te sientes mal, este botón permite acceder a las opciones de emergencia.", target: "SOS", selector: ".sos" },
 ];
 
 function Header() {
   return <header className="topbar">
-    <div className="brand-heart" aria-hidden="true">♥</div>
+    <div className="brand-heart" aria-hidden="true"><HeartPulse /></div>
     <div className="brand"><strong>VITANEX</strong><small>Tu salud, siempre a tiempo</small></div>
     <button className="bell" aria-label="Notificaciones">♧</button>
   </header>;
@@ -37,7 +38,7 @@ function Home({ goMedicines }: { goMedicines: () => void }) {
     <p className="lead">Tienes tu salud organizada para hoy.</p>
     <span className="status-pill">Pastillero disponible muy pronto</span>
 
-    <button className="sos">
+    <button className="sos" data-tour="sos">
       <span className="sos-icon">△</span>
       <span><strong>SOS · Me siento mal</strong><small>Llama al 911 o avisa a tu contacto de emergencia</small></span>
       <b>›</b>
@@ -83,14 +84,29 @@ function EmptyScreen({ tab, openTutorial }: { tab: Tab; openTutorial: () => void
 
 function Tutorial({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState(0);
+  const [spot, setSpot] = useState<DOMRect | null>(null);
   const item = tutorialSteps[step];
+  useEffect(() => {
+    const update = () => {
+      const element = document.querySelector(item.selector);
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+        window.setTimeout(() => setSpot(element.getBoundingClientRect()), 280);
+      }
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [step, item.selector]);
   const finish = async () => {
     await Preferences.set({ key: "vitanex_tutorial_seen", value: "true" });
     onClose();
   };
   return <div className="tutorial-backdrop" role="dialog" aria-modal="true">
+    {spot && <div className="tutorial-spotlight" style={{ top: spot.top - 8, left: spot.left - 8, width: spot.width + 16, height: spot.height + 16 }} />}
+    <div className="tutorial-pointer">↓</div>
     <div className="tutorial-card">
-      <div className="tutorial-mark">♥</div>
+      <div className="tutorial-mark"><HeartPulse /></div>
       <span className="tutorial-count">{step + 1} de {tutorialSteps.length}</span>
       <h2>{item.title}</h2>
       <p>{item.text}</p>
@@ -121,7 +137,7 @@ function App() {
     <Header />
     {tab === "inicio" ? <Home goMedicines={() => setTab("medicinas")} /> : <EmptyScreen tab={tab} openTutorial={() => setTutorial(true)} />}
     <nav className="bottom-nav">
-      {navItems.map(item => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>
+      {navItems.map(item => <button key={item.id} data-tour={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>
         <span>{item.icon}</span><small>{item.label}</small>
       </button>)}
     </nav>
