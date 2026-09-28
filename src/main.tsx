@@ -131,7 +131,7 @@ function App() {
   useEffect(() => { if(loaded) Preferences.set({key:EVENTS_KEY,value:JSON.stringify(events)}); },[events,loaded]);
   useEffect(() => {
     if(!loaded || !medicines.length) return;
-    const group=getNextGroup(medicines,events); const notifications=group.filter(item=>item.date>Date.now()).map((item,index)=>({id:Math.abs(Array.from(item.medicine.id).reduce((n,c)=>n+c.charCodeAt(0),1000))+index,title:"VITANEX · Hora de tu medicamento",body:`${item.medicine.name} · ${item.medicine.dose}`,schedule:{at:item.date},extra:{medicineId:item.medicine.id}}));
+    const group=getNextGroup(medicines,events); const notifications=group.filter(item=>item.date.getTime()>Date.now()).map((item,index)=>({id:Math.abs(Array.from(item.medicine.id).reduce((n,c)=>n+c.charCodeAt(0),1000))+index,title:"VITANEX · Hora de tu medicamento",body:`${item.medicine.name} · ${item.medicine.dose}`,schedule:{at:item.date},extra:{medicineId:item.medicine.id}}));
     if(notifications.length) LocalNotifications.schedule({notifications}).catch(()=>{});
   },[medicines,events,loaded]);
   const openAdd=()=>{setEditing(null);setModal(true);};
